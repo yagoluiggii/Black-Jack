@@ -1,0 +1,363 @@
+import java.awt.*;
+import java.awt.event.*;
+import java.util.ArrayList;
+import java.util.Random;
+import javax.swing.*;
+
+public class BlackJack {
+    private class Card {
+        String value;
+        String type;
+
+        Card(String value, String type) {
+            this.value = value;
+            this.type = type;
+        }
+
+        public String toString() {
+            return value + "-" + type;
+        }
+
+        public int getValue() {
+            if ("AJQK".contains(value)) { //A J Q K
+                if (value.equals("A")) {
+                    return 11;
+                }
+                return 10;
+            }
+            return Integer.parseInt(value); //2-10
+        }
+
+        public boolean isAce() {
+            return value.equals("A");
+        }
+
+        public String getImagePath() {
+            return "./cards/" + toString() + ".png";
+        }
+    }
+
+    ArrayList<Card> deck;
+    Random random = new Random(); //shuffle deck
+
+    //dealer
+    Card hiddenCard;
+    ArrayList<Card> dealerHand;
+    int dealerSum;
+    int dealerAceCount;
+
+    //player
+    ArrayList<Card> playerHand;
+    int playerSum;
+    int playerAceCount;
+
+    //apostas
+    int balance = 1000; //fichas que o jogador tem
+    int bet = 0; //aposta da rodada atual
+    String message = ""; //resultado da rodada (Você ganhou! / Você perdeu! / Empate!)
+
+    //window
+    int boardWidth = 600;
+    int boardHeight = 650;
+
+    int cardWidth = 110; //ratio should 1/1.4
+    int cardHeight = 154;
+
+    JFrame frame = new JFrame("Black Jack");
+
+    JLabel balanceLabel = new JLabel("Saldo: " + balance);
+    JLabel betLabel = new JLabel("Aposta: " + bet);
+
+    JPanel gamePanel = new JPanel() {
+        @Override
+        public void paintComponent(Graphics g) {
+            super.paintComponent(g);
+
+            try {
+                //só desenha as cartas se a rodada já começou (aposta confirmada)
+                if (dealerHand != null) {
+                    //draw hidden card
+                    Image hiddenCardImg = new ImageIcon(getClass().getResource("./cards/BACK.png")).getImage();
+                    if (!stayButton.isEnabled()) {
+                        hiddenCardImg = new ImageIcon(getClass().getResource(hiddenCard.getImagePath())).getImage();
+                    }
+                    g.drawImage(hiddenCardImg, 20, 20, cardWidth, cardHeight, null);
+
+                    //draw dealer's hand
+                    for (int i = 0; i < dealerHand.size(); i++) {
+                        Card card = dealerHand.get(i);
+                        Image cardImg = new ImageIcon(getClass().getResource(card.getImagePath())).getImage();
+                        g.drawImage(cardImg, cardWidth + 25 + (cardWidth + 5) * i, 20, cardWidth, cardHeight, null);
+                    }
+
+                    //draw player's hand
+                    for (int i = 0; i < playerHand.size(); i++) {
+                        Card card = playerHand.get(i);
+                        Image cardImg = new ImageIcon(getClass().getResource(card.getImagePath())).getImage();
+                        g.drawImage(cardImg, 20 + (cardWidth + 5) * i, 320, cardWidth, cardHeight, null);
+                    }
+                }
+
+                //mostra a mensagem de resultado da rodada
+                if (!message.isEmpty()) {
+                    g.setFont(new Font("Arial", Font.PLAIN, 30));
+                    g.setColor(Color.white);
+                    g.drawString(message, 180, 250);
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    };
+
+    JPanel buttonPanel = new JPanel();
+
+    //botões da tela de aposta
+    JButton bet10Button = new JButton("+10");
+    JButton bet25Button = new JButton("+25");
+    JButton bet50Button = new JButton("+50");
+    JButton confirmBetButton = new JButton("Apostar");
+
+    //botões da rodada em andamento
+    JButton hitButton = new JButton("Hit");
+    JButton stayButton = new JButton("Stay");
+
+    //botão de nova rodada
+    JButton newRoundButton = new JButton("Nova Rodada");
+
+    BlackJack() {
+        frame.setVisible(true);
+        frame.setSize(boardWidth, boardHeight);
+        frame.setLocationRelativeTo(null);
+        frame.setResizable(false);
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+        //painel de cima com saldo e aposta
+        JPanel topPanel = new JPanel();
+        topPanel.setBackground(new Color(53, 101, 77));
+        balanceLabel.setForeground(Color.white);
+        betLabel.setForeground(Color.white);
+        topPanel.add(balanceLabel);
+        topPanel.add(betLabel);
+        frame.add(topPanel, BorderLayout.NORTH);
+
+        gamePanel.setLayout(new BorderLayout());
+        gamePanel.setBackground(new Color(53, 101, 77));
+        frame.add(gamePanel);
+
+        frame.add(buttonPanel, BorderLayout.SOUTH);
+
+        //listeners dos botões de aposta
+        bet10Button.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                addBet(10);
+            }
+        });
+        bet25Button.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                addBet(25);
+            }
+        });
+        bet50Button.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                addBet(50);
+            }
+        });
+        confirmBetButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                if (bet > 0) {
+                    balance -= bet;
+                    startGame();
+                    showGameButtons();
+                    updateLabels();
+                    gamePanel.repaint();
+                }
+            }
+        });
+
+        //listeners dos botões do jogo
+        hitButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                Card card = deck.remove(deck.size() - 1);
+                playerSum += card.getValue();
+                playerAceCount += card.isAce() ? 1 : 0;
+                playerHand.add(card);
+                if (reducePlayerAce() > 21) { //A + 2 + J --> 1 + 2 + J
+                    endRound("Você perdeu!", 0);
+                }
+                gamePanel.repaint();
+            }
+        });
+
+        stayButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                hitButton.setEnabled(false);
+                stayButton.setEnabled(false);
+
+                while (dealerSum < 17) {
+                    Card card = deck.remove(deck.size() - 1);
+                    dealerSum += card.getValue();
+                    dealerAceCount += card.isAce() ? 1 : 0;
+                    dealerHand.add(card);
+                }
+
+                dealerSum = reduceDealerAce();
+                playerSum = reducePlayerAce();
+
+                if (dealerSum > 21 || playerSum > dealerSum) {
+                    endRound("Você ganhou!", bet * 2);
+                } else if (playerSum == dealerSum) {
+                    endRound("Empate!", bet);
+                } else {
+                    endRound("Você perdeu!", 0);
+                }
+                gamePanel.repaint();
+            }
+        });
+
+        newRoundButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                if (balance <= 0) {
+                    balance = 1000; //novas fichas se zerar o saldo
+                }
+                bet = 0;
+                message = "";
+                dealerHand = null; //esconde as cartas da rodada anterior
+                showBettingButtons();
+                updateLabels();
+                gamePanel.repaint();
+            }
+        });
+
+        showBettingButtons();
+        updateLabels();
+    }
+
+    public void addBet(int amount) {
+        if (bet + amount <= balance) {
+            bet += amount;
+            updateLabels();
+        }
+    }
+
+    public void showBettingButtons() {
+        buttonPanel.removeAll();
+        buttonPanel.add(bet10Button);
+        buttonPanel.add(bet25Button);
+        buttonPanel.add(bet50Button);
+        buttonPanel.add(confirmBetButton);
+        buttonPanel.revalidate();
+        buttonPanel.repaint();
+    }
+
+    public void showGameButtons() {
+        hitButton.setEnabled(true);
+        stayButton.setEnabled(true);
+        buttonPanel.removeAll();
+        buttonPanel.add(hitButton);
+        buttonPanel.add(stayButton);
+        buttonPanel.revalidate();
+        buttonPanel.repaint();
+    }
+
+    public void showNewRoundButton() {
+        buttonPanel.removeAll();
+        buttonPanel.add(newRoundButton);
+        buttonPanel.revalidate();
+        buttonPanel.repaint();
+    }
+
+    public void endRound(String resultMessage, int payout) {
+        balance += payout;
+        message = resultMessage;
+        hitButton.setEnabled(false);
+        stayButton.setEnabled(false);
+        showNewRoundButton();
+        updateLabels();
+    }
+
+    public void updateLabels() {
+        balanceLabel.setText("Saldo: " + balance);
+        betLabel.setText("Aposta: " + bet);
+    }
+
+    public void startGame() {
+        //deck
+        buildDeck();
+        shuffleDeck();
+
+        //dealer
+        dealerHand = new ArrayList<Card>();
+        dealerSum = 0;
+        dealerAceCount = 0;
+
+        hiddenCard = deck.remove(deck.size() - 1); //remove card at last index
+        dealerSum += hiddenCard.getValue();
+        dealerAceCount += hiddenCard.isAce() ? 1 : 0;
+
+        Card card = deck.remove(deck.size() - 1);
+        dealerSum += card.getValue();
+        dealerAceCount += card.isAce() ? 1 : 0;
+        dealerHand.add(card);
+
+        //player
+        playerHand = new ArrayList<Card>();
+        playerSum = 0;
+        playerAceCount = 0;
+
+        for (int i = 0; i < 2; i++) {
+            card = deck.remove(deck.size() - 1);
+            playerSum += card.getValue();
+            playerAceCount += card.isAce() ? 1 : 0;
+            playerHand.add(card);
+        }
+    }
+
+    public void buildDeck() {
+        deck = new ArrayList<Card>();
+        String[] values = {"A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"};
+        String[] types = {"C", "D", "H", "S"};
+
+        for (int i = 0; i < types.length; i++) {
+            for (int j = 0; j < values.length; j++) {
+                Card card = new Card(values[j], types[i]);
+                deck.add(card);
+            }
+        }
+    }
+
+    public void shuffleDeck() {
+        for (int i = 0; i < deck.size(); i++) {
+            int j = random.nextInt(deck.size());
+            Card currCard = deck.get(i);
+            Card randomCard = deck.get(j);
+            deck.set(i, randomCard);
+            deck.set(j, currCard);
+        }
+    }
+
+    public int reducePlayerAce() {
+        while (playerSum > 21 && playerAceCount > 0) {
+            playerSum -= 10;
+            playerAceCount -= 1;
+        }
+        return playerSum;
+    }
+
+    public int reduceDealerAce() {
+        while (dealerSum > 21 && dealerAceCount > 0) {
+            dealerSum -= 10;
+            dealerAceCount -= 1;
+        }
+        return dealerSum;
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                new BlackJack();
+            }
+        });
+    }
+}
